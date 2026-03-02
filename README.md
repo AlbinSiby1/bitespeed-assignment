@@ -6,7 +6,7 @@ It implements the `/identify` endpoint as described in the assignment.
 
 ---
 
-## 🚀 Tech Stack
+## Tech Stack
 
 * Node.js
 * Express
@@ -17,7 +17,7 @@ It implements the `/identify` endpoint as described in the assignment.
 
 ---
 
-# 📌 Problem Overview
+# Problem Overview
 
 Each customer can have multiple `Contact` records.
 

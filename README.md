@@ -41,7 +41,7 @@ The `/identify` endpoint:
 
 ---
 
-# 🗄 Database Schema
+# Database Schema
 
 ## Table: `Contact`
 

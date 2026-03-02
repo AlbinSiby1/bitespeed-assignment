@@ -28,7 +28,6 @@ app.post("/identify", async (req, res) => {
       SELECT * FROM Contact
       WHERE (email = $1 OR phoneNumber = $2)
       AND deletedAt IS NULL
-      ORDER BY createdAt ASC
       `,
       [email || null, phoneNumber || null]
     );
@@ -45,7 +44,7 @@ app.post("/identify", async (req, res) => {
 
       await client.query("COMMIT");
 
-      return res.status(200).json({
+      return res.json({
         contact: {
           primaryContactId: insert.rows[0].id,
           emails: email ? [email] : [],
@@ -55,11 +54,39 @@ app.post("/identify", async (req, res) => {
       });
     }
 
-    const rootIds = matchResult.rows.map(row =>
+    const rootCandidates = matchResult.rows.map(row =>
       row.linkprecedence === "primary" ? row.id : row.linkedid
     );
 
-    const rootId = Math.min(...rootIds);
+    const rootId = Math.min(...rootCandidates);
+
+    for (const row of matchResult.rows) {
+      const candidateRoot =
+        row.linkprecedence === "primary" ? row.id : row.linkedid;
+
+      if (candidateRoot !== rootId) {
+        await client.query(
+          `
+          UPDATE Contact
+          SET linkPrecedence = 'secondary',
+              linkedId = $1,
+              updatedAt = CURRENT_TIMESTAMP
+          WHERE id = $2
+          `,
+          [rootId, candidateRoot]
+        );
+
+        await client.query(
+          `
+          UPDATE Contact
+          SET linkedId = $1,
+              updatedAt = CURRENT_TIMESTAMP
+          WHERE linkedId = $2
+          `,
+          [rootId, candidateRoot]
+        );
+      }
+    }
 
     const groupResult = await client.query(
       `
@@ -70,51 +97,25 @@ app.post("/identify", async (req, res) => {
       [rootId]
     );
 
-    let contacts = groupResult.rows;
-
-    contacts.sort(
-      (a, b) =>
-        new Date(a.createdat).getTime() -
-        new Date(b.createdat).getTime()
-    );
-
-    const primary = contacts[0];
-
-    for (const contact of contacts) {
-      if (
-        contact.linkprecedence === "primary" &&
-        contact.id !== primary.id
-      ) {
-        await client.query(
-          `
-          UPDATE Contact
-          SET linkPrecedence = 'secondary',
-              linkedId = $1,
-              updatedAt = CURRENT_TIMESTAMP
-          WHERE id = $2
-          `,
-          [primary.id, contact.id]
-        );
-      }
-    }
+    const contacts = groupResult.rows;
 
     const emailExists =
-    email ? contacts.some(c => c.email === email) : true;
+      email ? contacts.some(c => c.email === email) : true;
 
     const phoneExists =
-    phoneNumber ? contacts.some(c => c.phonenumber === phoneNumber) : true;
+      phoneNumber ? contacts.some(c => c.phonenumber === phoneNumber) : true;
 
     if (
-    (email && !emailExists) ||
-    (phoneNumber && !phoneExists)
+      (email && !emailExists) ||
+      (phoneNumber && !phoneExists)
     ) {
-    await client.query(
+      await client.query(
         `
         INSERT INTO Contact (email, phoneNumber, linkPrecedence, linkedId)
         VALUES ($1, $2, 'secondary', $3)
         `,
-        [email || null, phoneNumber || null, primary.id]
-    );
+        [email || null, phoneNumber || null, rootId]
+      );
     }
 
     const finalResult = await client.query(
@@ -123,7 +124,7 @@ app.post("/identify", async (req, res) => {
       WHERE id = $1 OR linkedId = $1
       ORDER BY createdAt ASC
       `,
-      [primary.id]
+      [rootId]
     );
 
     const finalContacts = finalResult.rows;
@@ -142,9 +143,9 @@ app.post("/identify", async (req, res) => {
 
     await client.query("COMMIT");
 
-    return res.status(200).json({
+    return res.json({
       contact: {
-        primaryContactId: primary.id,
+        primaryContactId: rootId,
         emails,
         phoneNumbers,
         secondaryContactIds,
